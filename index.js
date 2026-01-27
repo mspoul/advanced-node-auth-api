@@ -1,12 +1,14 @@
 require('dotenv').config();
-
-const jwt=require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 const express = require('express');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const swaggerJsdoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
+
 const User = require('./models/User');
 const { protect } = require('./middleware/auth');
-const bcrypt=require('bcrypt');
 const connectDB = require('./config/db');
-const crypto = require('crypto');
 const sendEmail = require('./config/email');
 
 const app = express();
@@ -14,6 +16,66 @@ const app = express();
 connectDB();
 
 app.use(express.json());
+
+
+// --- SWAGGER SETUP ---
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Advanced Auth API',
+      version: '1.0.0',
+      description: 'Professional API documentation for user authentication',
+    },
+    servers: [{ url: 'http://localhost:5001' }],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        }
+      }
+    }
+  },
+  apis: ['./index.js'], 
+};
+
+const swaggerDocs = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
+
+/**
+ * @openapi
+ * /api/auth/signup:
+ *   post:
+ *     summary: Register a new user
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - password
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Suraj
+ *               email:
+ *                 type: string
+ *                 example: suraj@example.com
+ *               password:
+ *                 type: string
+ *                 example: StrongPassword123
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ */
 
 app.post('/api/auth/signup', async(req,res)=>{
     try{
@@ -59,6 +121,36 @@ app.post('/api/auth/signup', async(req,res)=>{
 
 });
 
+/**
+ * @openapi
+ * /api/auth/login:
+ *   post:
+ *     summary: Login user
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: suraj@example.com
+ *               password:
+ *                 type: string
+ *                 example: StrongPassword123
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *       401:
+ *         description: Invalid credentials
+ */
+
 app.post('/api/auth/login', async(req,res)=>{
 try{
     const {email,password}=req.body;
@@ -100,10 +192,39 @@ catch(err){
 }
 
 });
+/**
+ * @openapi
+ * /api/auth/profile:
+ *   get:
+ *     summary: Get logged-in user profile
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User profile fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 name:
+ *                   type: string
+ *                   example: Suraj
+ *                 email:
+ *                   type: string
+ *                   example: suraj@example.com
+ *                 role:
+ *                   type: string
+ *                   example: user
+ *       401:
+ *         description: Unauthorized
+ */
 
 app.get('/api/auth/profile', protect, async (req, res) => {
     try {
-        // Fetch the full user data from DB using the ID from the token
+        
         const fullUser = await User.findById(req.user.id);
 
         res.status(200).json({
@@ -118,6 +239,31 @@ app.get('/api/auth/profile', protect, async (req, res) => {
 });
 
  
+/**
+ * @openapi
+ * /api/auth/forgot-password:
+ *   post:
+ *     summary: Send password reset link
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: suraj@example.com
+ *     responses:
+ *       200:
+ *         description: Password reset link sent
+ *       404:
+ *         description: User not found
+ */
 
 // --- FORGOT PASSWORD ---
 app.post('/api/auth/forgot-password', async (req, res) => {
@@ -125,15 +271,15 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         const user = await User.findOne({ email: req.body.email });
         if (!user) return res.status(404).json({ message: "No user found with this email" });
 
-        // 1. Generate Reset Token
+        
         const resetToken = crypto.randomBytes(32).toString('hex');
 
-        // 2. Hash it & Save to DB
+        
         user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
         user.resetPasswordExpiry = Date.now() + 10 * 60 * 1000; // 10 mins
         await user.save();
 
-        // 3. Prepare Email Content
+         
         const resetUrl = `${req.protocol}://${req.get('host')}/api/auth/reset-password/${resetToken}`;
         const message = `
             <h1>Password Reset Request</h1>
@@ -142,7 +288,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             <p>If you didn't request this, please ignore this email.</p>
         `;
 
-        // 4. Send Email using our utility
+         
         await sendEmail({
             email: user.email,
             subject: 'Your Password Reset Link (Valid for 10 min)',
@@ -162,6 +308,38 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         res.status(500).json({ message: "Error sending email. Please try again." });
     }
 });
+
+/**
+ * @openapi
+ * /api/auth/reset-password/{token}:
+ *   put:
+ *     summary: Reset password using reset token
+ *     tags:
+ *       - Auth
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - password
+ *             properties:
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password updated successfully
+ *       400:
+ *         description: Invalid or expired token
+ */
+
 
 // --- RESET PASSWORD ---
 app.put('/api/auth/reset-password/:token', async (req, res) => {
