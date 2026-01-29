@@ -15,8 +15,7 @@ const protect=(req,res,next)=>{
         const decoded=jwt.verify(token,process.env.JWT_SECRET_KEY);
 
         req.user=decoded;
-        next();
-
+        next();        
     }
     catch(err){
         res.status(401).json({
